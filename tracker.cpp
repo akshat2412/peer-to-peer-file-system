@@ -81,10 +81,10 @@
 */
 
 /*
-    Req: Get group owner port number
-    ggp:<group_id>
+    Req: Get group owner address
+    gga:<group_id>
     Res:
-        Success:<owner_port_number>
+        Success:<owner_url>:<owner_port_num>
         Failure
 */
 /*
@@ -96,14 +96,14 @@
 */
 /*
     Req: Add peer to group
-    apg:<group_id>:<port_number>
+    apg:<group_id>:<user_id>
     Res:
         Success
         Failure
 */
 /*
     Req: Leave group
-    lg:<group_id>:<port_no>
+    lg:<group_id>:<user_id>
     Res:
         Success
         Failure
@@ -130,7 +130,7 @@ unordered_map<string, file_info_tracker > g_file_info_tracker;
 unordered_map<string, string> g_users;
 unordered_map<string, bool> g_online_peers;
 unordered_map<int, group_info> g_group_info;
-unordered_map<string, client_address_info> g_userid_address_mapping;
+unordered_map<string, address_info> g_userid_address_mapping;
 
 ofstream logfile(LOG_FILE);
 void log_message(ofstream &t_file, const char* msg) {
@@ -201,7 +201,7 @@ int get_abb_index(const char* t_msg) {
     if(strcmp(t_msg, "cg") == 0) {
         return 8;
     }
-    if(strcmp(t_msg, "ggp") == 0) {
+    if(strcmp(t_msg, "gga") == 0) {
         return 9;
     }
     if(strcmp(t_msg, "apg") == 0) {
@@ -327,8 +327,8 @@ bool is_peer_online(string t_userid) {
 
 void* serve_requests(void* arg) {
     // cout << endl << "running hi function " << endl;
-    client_address_info client_address = *((client_address_info *)arg);
-    int clientfd = client_address.clientfd;
+    address_info client_address = *((address_info *)arg);
+    int clientfd = client_address.fd;
     char recv_buffer[MSGSIZE];
     char send_buffer[MSGSIZE];
     string ack;
@@ -417,7 +417,9 @@ void* serve_requests(void* arg) {
                             string pw = g_users[m_user_id];
                             if(strcmp(pw.c_str(), m_password.c_str()) == 0) {
                                 g_online_peers[m_user_id] = true;
-                                g_userid_address_mapping[m_user_id] = client_address;
+                                address_info user_address = client_address;
+                                user_address.port = m_port_no;
+                                g_userid_address_mapping[m_user_id] = user_address;
                                 
                                 cout << "User logged in succesfully" << endl;
                                 
@@ -487,36 +489,77 @@ void* serve_requests(void* arg) {
                         break;
             }
 
-            // case 9: {   // Get owner port number of the group
-            //             int m_group_id = get_int(message[1]);
-            //             cout << "Requesting owner port number of group " << m_group_id << endl;
-            //             if(g_group_info.find(m_group_id) != g_group_info.end()) {
-            //                 string msg = "Success:" + to_string(g_group_info[m_group_id].owner_port_no);
-            //                 bzero(send_buffer, MSGSIZE);
-            //                 strcpy(send_buffer, msg.c_str());
-            //                 send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
-            //                 break;
-            //             }
-            // }
+            case 9: {   // Get address of group owner
+                        /*
+                            Req: Get group owner address
+                            gga:<group_id>
+                            Res:
+                                Success:<owner_url>:<owner_port_num>
+                                Failure
+                        */
+                        int m_group_id = get_int(message[1]);
+                        cout << "Requesting owner address of group " << m_group_id << endl;
+                        string msg = "";
+                        if(g_group_info.find(m_group_id) != g_group_info.end()) {
+                            string owner_userid = g_group_info[m_group_id].owner_userid;
+                            address_info owner_address = g_userid_address_mapping[owner_userid];
+
+                            vector<string> message_parts;
+                            message_parts.push_back("Success");
+                            message_parts.push_back(owner_address.url);
+                            message_parts.push_back(to_string(owner_address.port));
+                            msg = get_colon_joined_string(message_parts);
+                        }
+                        else {
+                            msg = "Failure";
+                        }
+                        bzero(send_buffer, MSGSIZE);
+                        strcpy(send_buffer, msg.c_str());
+                        send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
+                        break;
+            }
             
-            // case 10: {
-            //             cout << "Requesting to add peer " << message[2] << " to group " << message[1] << endl;
-            //             g_group_info[get_int(message[1])].member_peers[get_int(message[2])] = true;
-            //             string msg = "Success";
-            //             bzero(send_buffer, MSGSIZE);
-            //             strcpy(send_buffer, msg.c_str());
-            //             send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
-            //             break;
-            // }
-            // case 11: {
-            //             cout << message[2] << " requesting to leave group " << message[1] << endl;
-            //             g_group_info[get_int(message[1])].member_peers[get_int(message[2])] = false;
-            //             string msg = "Success";
-            //             bzero(send_buffer, MSGSIZE);
-            //             strcpy(send_buffer, msg.c_str());
-            //             send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
-            //             break;
-            // }
+            case 10: {  // Add peer to group
+                        /*
+                            Req: Add peer to group
+                            apg:<group_id>:<user_id>
+                            Res:
+                                Success
+                                Failure
+                        */
+                        int m_groupid = get_int(message[1]);
+                        string m_userid = message[2];
+                        cout << "Requesting to add peer " << m_userid << " to group " << m_groupid << endl;
+                        
+                        g_group_info[m_groupid].member_peers[m_userid] = true;
+                        
+                        string msg = "Success";
+                        bzero(send_buffer, MSGSIZE);
+                        strcpy(send_buffer, msg.c_str());
+                        send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
+                        break;
+            }
+            
+            case 11: {  // Leave group
+                        /*
+                            Req: Leave group
+                            lg:<group_id>:<user_id>
+                            Res:
+                                Success
+                                Failure
+                        */
+                        int m_groupid = get_int(message[1]);
+                        string m_userid = message[2];
+
+                        cout << m_userid << " requesting to leave group " << message[1] << endl;
+                        g_group_info[get_int(message[1])].member_peers[m_userid] = false;
+                        
+                        string msg = "Success";
+                        bzero(send_buffer, MSGSIZE);
+                        strcpy(send_buffer, msg.c_str());
+                        send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
+                        break;
+            }
             case 12: {
                         cout << "Sending list of groups " << endl;
                         string msg = "Success";
@@ -611,7 +654,7 @@ int main(int argc, char* argv[]) {
         int size = t_ids.size();
         cout << "new connection from: " << inet_ntoa(client_address.sin_addr) << " : " << ntohs(client_address.sin_port) << endl;
 
-        client_address_info client_address_info_struct = {
+        address_info client_address_info_struct = {
             inet_ntoa(client_address.sin_addr),
             ntohs(client_address.sin_port),
             clientfd

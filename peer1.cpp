@@ -80,23 +80,23 @@
 */
 
 /*
-    Req: Get group owner port number
-    ggp:<group_id>
+    Req: Get group owner address
+    gga:<group_id>
     Res:
-        Success:<owner_port_number>
+        Success:<owner_url>:<owner_port_num>
         Failure
 */
 
 /*
     Req: Join group
-    join:<group_id>:<port_number>
+    join:<group_id>:<user_id>
     Res:
-        Success:<owner_port_number>
+        Success
         Failure
 */
 /*
     Req: Add peer to group
-    apg:<group_id>:<port_number>
+    apg:<group_id>:<user_id>
     Res:
         Success
         Failure
@@ -104,7 +104,7 @@
 
 /*
     Req: Leave group
-    lg:<group_id>:<port_no>
+    lg:<group_id>:<user_id>
     Res:
         Success
         Failure
@@ -140,6 +140,7 @@ void log_message(ofstream &t_file, const char* msg) {
     return;
 }
 unordered_map<string, file_info> file_info_map;
+unordered_map<int, set<string> > g_group_joining_requests;
 
 void get_tracker_info(char* t_filename) {
     ifstream tracker_file(t_filename);
@@ -225,6 +226,13 @@ int get_option_number(const char* t_command) {
     if(strcmp(t_command, "list_groups") == 0) {
         return 9;
     }
+    if(strcmp(t_command, "list_requests") == 0) {
+        return 10;
+    }
+    if(strcmp(t_command, "accept_request") == 0) {
+        return 11;
+    }
+
     return 0;
 }
 
@@ -431,11 +439,14 @@ void create_user(char* t_resp, char* t_username, char* t_password, int t_socketf
 }
 
 void login_user(char* t_resp, char* t_username, char* t_password, int t_socketfd) {
-    vector<string> message_parts;
-    message_parts.push_back("login");
-    message_parts.push_back(t_username);
-    message_parts.push_back(t_password);
-    message_parts.push_back(to_string(g_port));
+    /*
+        Req: login
+        login:user_id:password:<port_number of the peer server>
+        Res:
+            Success
+            Failure
+    */
+    vector<string> message_parts{"login", t_username, t_password, to_string(g_port)};
 
     string msg = get_colon_joined_string(message_parts);
     char buffer[MSGSIZE];
@@ -506,8 +517,15 @@ bool create_group(char* t_resp, char* t_gid, int t_socketfd) {
     return true;
 }
 
-void get_group_owner_port(char* t_resp, char* t_gid, int t_socketfd) {
-    string msg = "ggp:" + string(t_gid);
+void get_group_owner_address(char* t_resp, char* t_gid, int t_socketfd) {
+    /*
+        Req: Get group owner address
+        gga:<group_id>
+        Res:
+            Success:<owner_url>:<owner_port_num>
+            Failure
+    */
+    string msg = "gga:" + string(t_gid);
     char buffer[MSGSIZE];
 
     strcpy(buffer, msg.c_str());
@@ -525,7 +543,14 @@ void get_group_owner_port(char* t_resp, char* t_gid, int t_socketfd) {
     return;
 }
 
-void request_to_join_group(char* t_resp, char* t_gid, char* t_owner_port) {
+void request_to_join_group(char* t_resp, char* t_gid, char* t_owner_url, char* t_owner_port) {
+    /*
+        Req: Join group
+        join:<group_id>:<user_id>
+        Res:
+            Success
+            Failure
+    */
     sockaddr_in server_address;
     int socketfd;
     
@@ -535,15 +560,17 @@ void request_to_join_group(char* t_resp, char* t_gid, char* t_owner_port) {
     server_address.sin_family = AF_INET;
     server_address.sin_port = htons(get_int(t_owner_port)); //host to network short
 
-    if(inet_pton(AF_INET, LOCALHOST, &server_address.sin_addr) < 0) print_err_and_exit("Invalid address");
+    if(inet_pton(AF_INET, t_owner_url, &server_address.sin_addr) < 0) print_err_and_exit("Invalid address");
 
-    print_message(string("Trying to connect with " + string(LOCALHOST) + ": " + to_string(g_tracker_port)).c_str());
+    // print_message(string("Trying to connect with " + string(t_owner_url) + ": " + to_string(g_tracker_port)).c_str());
     if(connect(socketfd, (sockaddr*)&server_address, sizeof(server_address)) < 0) {
         print_err_and_exit("unable to establish connection");
     }
     print_message("connected successfully to the owner peer");
 
-    string msg = "join:" + string(t_gid) + ":" + to_string(g_port);
+    vector<string> msg_parts{"join", string(t_gid), g_userid};
+    string msg = get_colon_joined_string(msg_parts);
+    
     char buffer[MSGSIZE];
     strcpy(buffer, msg.c_str());
     send(socketfd, buffer, strlen(buffer), 0);
@@ -571,6 +598,58 @@ vector<int> get_peer_ports(char* t_peer_list) {
     return peer_list;
 }
 
+void add_peer_to_group(char* t_resp, char* t_group, char* t_peer_userid, int t_socketfd) {
+    /*
+        Req: Add peer to group
+        apg:<group_id>:<user_id>
+        Res:
+            Success
+            Failure
+    */
+
+    vector<string> message_parts{"apg", string(t_group), string(t_peer_userid)};
+    string msg = get_colon_joined_string(message_parts);
+
+    char buffer[MSGSIZE];
+    strcpy(buffer, msg.c_str());
+
+    send(t_socketfd, buffer, strlen(buffer), 0);
+
+    bzero(t_resp, MSGSIZE);
+    int rs;
+
+    rs = recv(t_socketfd, t_resp, MSGSIZE, 0);
+
+    if(rs < 0) {
+        print_err_and_exit("error in joining group");
+    }
+    return;
+}
+
+void leave_group(char* t_resp, char* t_groupid, int t_socketfd) {
+    /*
+        Req: Leave group
+        lg:<group_id>:<user_id>
+        Res:
+            Success
+            Failure
+    */
+   	vector<string> message_parts{"lg", string(t_groupid), g_userid};
+    string msg = get_colon_joined_string(message_parts);
+    
+	char buffer[MSGSIZE];
+    bzero(buffer, MSGSIZE);
+    strcpy(buffer, msg.c_str());
+    send(t_socketfd, buffer, strlen(buffer) + 1, 0);
+
+    int rs;
+    rs = recv(t_socketfd, t_resp, MSGSIZE, 0);
+
+    if(rs < 0) {
+        print_err_and_exit("error in leaving group");
+    }
+}
+
 void* client_thread(void* arg) {
     bool keep_running = true;
 
@@ -596,6 +675,7 @@ void* client_thread(void* arg) {
     string command;
     char command_buffer[MSGSIZE];
     while(keep_running) {
+		
         cout << "> ";
         getline(cin, command);
         bzero(command_buffer, MSGSIZE);
@@ -740,39 +820,37 @@ void* client_thread(void* arg) {
                 }
 
                 case 7: {   // Join group
+                            if(g_userid.length() < 1) {
+                                cout << "Can't join group withoug logging in first" << endl;
+                                break;
+                            }
                             char* c_group_id = command_components[1];
-                            cout << "Trying to join group " << c_group_id;
+                            cout << "Trying to join group " << c_group_id << endl;
                             char resp[MSGSIZE];
-                            get_group_owner_port(resp, c_group_id, socketfd);
+                            get_group_owner_address(resp, c_group_id, socketfd);
 
                             vector<char*> response_components = parse_message(resp);
-                            char* m_group_owner_port = response_components[1];
                             if(strcmp(response_components[0], "Success") == 0) {
+                                char* m_group_owner_url = response_components[1];
+                                char* m_group_owner_port = response_components[2];
+                                cout << "group owner port address =  " << m_group_owner_url << endl;
                                 cout << "group owner port number =  " << m_group_owner_port << endl;
-                                request_to_join_group(resp, c_group_id, m_group_owner_port);
+                                request_to_join_group(resp, c_group_id, m_group_owner_url, m_group_owner_port);
                             }
                             else {
                                 cout << "Error in joining group " << c_group_id << endl;
                             }
                             break;
                 }
-                case 8: {
+                
+				case 8: {	// Leave group
+							int c_groupid = get_int(command_components[1]);
                             cout << "Trying to leave group " << command_components[1] << endl;
                             char resp[MSGSIZE];
                             bzero(resp, MSGSIZE);
-                            string msg = "lg:" + string(command_components[1]) + ":" + to_string(g_port);
-                            char buffer[MSGSIZE];
-                            bzero(buffer, MSGSIZE);
-                            strcpy(buffer, msg.c_str());
-                            send(socketfd, buffer, strlen(buffer) + 1, 0);
+                            
+							leave_group(resp, command_components[1], socketfd);
 
-                            int rs;
-
-                            rs = recv(socketfd, resp, MSGSIZE, 0);
-
-                            if(rs < 0) {
-                                print_err_and_exit("error in leaving group");
-                            }
                             vector<char*> response_components = parse_message(resp);
                             if(strcmp(response_components[0], "Success") == 0) {
                                 cout << "Left group " << command_components[1] << endl;
@@ -782,6 +860,7 @@ void* client_thread(void* arg) {
                             }
                             break;
                 }
+
                 case 9: {
                             string msg = "list_groups";
                             char buffer[MSGSIZE];
@@ -805,6 +884,48 @@ void* client_thread(void* arg) {
                             }
                             else {
                                 cout << "Error in listing groups " << endl;
+                            }
+                            break;
+                }
+
+                case 10: {  // List pending requests
+                            int c_gid = get_int(command_components[1]);
+                            if(g_groups_owned.find(c_gid) == g_groups_owned.end() || g_groups_owned[c_gid] == false) {
+                                cout << "This peer is not the owner of the requested group" << endl;
+                                break;
+                            }
+                            set<string>::iterator it;
+                            set<string> requests_set = g_group_joining_requests[c_gid];
+                            for(it = requests_set.begin(); it != requests_set.end(); it++) {
+                                cout << *it << endl;
+                            }
+                            break;
+
+                }
+                
+				case 11: {  // Accept requests
+                            int c_gid = get_int(command_components[1]);
+                            string c_userid = command_components[2];
+                            if(g_groups_owned.find(c_gid) == g_groups_owned.end() || g_groups_owned[c_gid] == false) {
+                                cout << "This peer is not the owner of the requested group" << endl;
+                                break;
+                            }
+
+                            if(g_group_joining_requests[c_gid].find(c_userid) == g_group_joining_requests[c_gid].end()) {
+                                cout << "Joining request doesn't exist" << endl;
+                                break;
+                            }
+
+                            char resp[MSGSIZE];
+                            add_peer_to_group(resp, command_components[1], command_components[2], socketfd);
+                            
+                            vector<char*> response_components = parse_message(resp);
+                            if(strcmp(response_components[0], "Success") == 0) {
+                                g_group_joining_requests[c_gid].erase(c_userid);
+                                cout << c_userid << " added successfuly to group " << c_gid << endl;
+                            }
+                            else {
+                                cout << "Unable to complete request " << endl;
                             }
                             break;
                 }
@@ -852,43 +973,6 @@ void* send_chunks(void* arg) {
     // send(clientfd, buffer, strlen(buffer) + 1, 0);
 }
 
-void add_peer_to_group(char* t_resp, char* t_group, char* t_peer_port) {
-    sockaddr_in server_address;
-    int socketfd;
-    
-    socketfd = socket(AF_INET, SOCK_STREAM, 0);
-    if(socketfd < 0) print_err_and_exit("Couldn't create socket");
-
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(g_tracker_port); //host to network short
-
-    if(inet_pton(AF_INET, LOCALHOST, &server_address.sin_addr) < 0) print_err_and_exit("Invalid address");
-
-    print_message(string("Trying to connect with " + string(LOCALHOST) + ": " + to_string(g_tracker_port)).c_str());
-    if(connect(socketfd, (sockaddr*)&server_address, sizeof(server_address)) < 0) {
-        print_err_and_exit("unable to establish connection");
-    }
-    print_message("connected successfully to the tracker");
-    string msg = "apg:" + string(t_group) + ":" + string(t_peer_port);
-
-    char buffer[MSGSIZE];
-    strcpy(buffer, msg.c_str());
-
-
-    send(socketfd, buffer, strlen(buffer), 0);
-
-    bzero(t_resp, MSGSIZE);
-    int rs;
-
-    rs = recv(socketfd, t_resp, MSGSIZE, 0);
-
-    if(rs < 0) {
-        print_err_and_exit("error in joining group");
-    }
-    close(socketfd);
-    return;
-}
-
 void* serve_requests(void* arg) {
     // cout << endl << "running hi function " << endl;
     int clientfd = *((int *)arg);
@@ -918,29 +1002,40 @@ void* serve_requests(void* arg) {
                     send_chunks((void*)&ci);
                     break;
 
-            case 3: {   // Serve group joining request
-                        char* m_group_id = message[1];
-                        cout << "requesting to join group " << message[1] << endl;
-                        char ch = 'y';
-                        cout << "allow port " << message[2] << " to join group " << message[1] << "? " << endl;
-                        // cin >> ch;
+            case 3: {   // group joining request
+                        /*
+                            Req: Join group
+                            join:<group_id>:<user_id>
+                            Res:
+                                Success
+                                Failure
+                        */
+                        int m_group_id = get_int(message[1]);
+                        string m_userid = message[2];
                         char resp[MSGSIZE];
-                        cout << ch << endl;
-                        if(ch == 'Y' || ch == 'y') {
-                            cout << "calling add peer to group" << endl;
-                            add_peer_to_group(resp, message[1], message[2]);
-                            cout << "received response in owner = " << resp << endl;
-                            vector<char*> response_components = parse_message(resp);
-                            cout << response_components.size() << endl;
-                            if(strcmp(response_components[0], "Success") == 0) {
-                                cout << "Port " << message[2] << "succesfully added to group " << message[1] << endl;
-                                string msg = "Success:" + to_string(g_port);
-                                char buffer[MSGSIZE];
-                                strcpy(buffer, msg.c_str());
 
-                                send(clientfd, buffer, strlen(buffer) + 1, 0);
-                                break;
-                            }
+                        if(g_groups_owned.find(m_group_id)!= g_groups_owned.end() && g_groups_owned[m_group_id]) {
+                            g_group_joining_requests[m_group_id].insert(m_userid);
+
+                            string msg = "Success";
+                            char buffer[MSGSIZE];
+                            strcpy(buffer, msg.c_str());
+
+                            send(clientfd, buffer, strlen(buffer) + 1, 0);
+                            break;
+                            // add_peer_to_group(resp, message[1], message[2]);
+                            // cout << "received response in owner = " << resp << endl;
+                            // vector<char*> response_components = parse_message(resp);
+                            // cout << response_components.size() << endl;
+                            // if(strcmp(response_components[0], "Success") == 0) {
+                            //     cout << "Port " << message[2] << "succesfully added to group " << message[1] << endl;
+                            //     string msg = "Success:" + to_string(g_port);
+                            //     char buffer[MSGSIZE];
+                            //     strcpy(buffer, msg.c_str());
+
+                            //     send(clientfd, buffer, strlen(buffer) + 1, 0);
+                            //     break;
+                            // }
                         }
                         string msg = "Failure";
                         char buffer[MSGSIZE];
