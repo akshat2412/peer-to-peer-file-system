@@ -861,7 +861,13 @@ void* client_thread(void* arg) {
                             break;
                 }
 
-                case 9: {
+                case 9: {	// List groups
+							/*
+								Req: List groups
+								list_groups
+								Res:
+									List of group ids
+							*/
                             string msg = "list_groups";
                             char buffer[MSGSIZE];
                             bzero(buffer, MSGSIZE);

@@ -553,14 +553,21 @@ void* serve_requests(void* arg) {
 
                         cout << m_userid << " requesting to leave group " << message[1] << endl;
                         g_group_info[get_int(message[1])].member_peers[m_userid] = false;
-                        
+
                         string msg = "Success";
                         bzero(send_buffer, MSGSIZE);
                         strcpy(send_buffer, msg.c_str());
                         send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
                         break;
             }
-            case 12: {
+            
+            case 12: {  // Send list of groups
+                        /*
+                            Req: List groups
+                            list_groups
+                            Res:
+                                List of group ids
+                        */
                         cout << "Sending list of groups " << endl;
                         string msg = "Success";
 

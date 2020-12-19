@@ -36,10 +36,10 @@ using namespace std;
         string owner_userid;
     };
 
-    struct client_address_info {
-        string client_address;
-        int client_port;
-        int clientfd;
+    struct address_info {
+        string url;
+        int port;
+        int fd;
     };
 
 
