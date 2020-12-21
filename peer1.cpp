@@ -116,6 +116,7 @@
     Res:
         Success:<List of group ids>
 */
+
 /*
     Req: Check if member of group
     cm:group_no:port_no
@@ -124,6 +125,13 @@
         0
 */
 
+/*
+    Req: List files in a group
+    lf:<group_id>:<user_id>
+    Res:
+        Success:<List of files separated by colon>
+        Failure
+*/
 using namespace std;
 
 // Global variables
@@ -139,8 +147,8 @@ void log_message(ofstream &t_file, const char* msg) {
     t_file << msg << endl;
     return;
 }
-unordered_map<string, file_info> file_info_map;
-unordered_map<int, set<string> > g_group_joining_requests;
+map<string, file_info> file_info_map;
+map<int, set<string> > g_group_joining_requests;
 
 void get_tracker_info(char* t_filename) {
     ifstream tracker_file(t_filename);
@@ -232,6 +240,9 @@ int get_option_number(const char* t_command) {
     if(strcmp(t_command, "accept_request") == 0) {
         return 11;
     }
+    if(strcmp(t_command, "list_files") == 0) {
+        return 12;
+    }
 
     return 0;
 }
@@ -283,7 +294,7 @@ void upload_file_to_tracker(char* t_resp, string t_filename, int t_groupid, int 
     };
 
     vector<string> message_parts{   "uf",
-                                    to_string(g_port),
+                                    g_userid,
                                     string(t_filename),
                                     to_string(file_size),
                                     to_string(num_chunks),
@@ -294,7 +305,6 @@ void upload_file_to_tracker(char* t_resp, string t_filename, int t_groupid, int 
     strcpy(buffer, msg.c_str());
 
     send(t_socketfd, buffer, strlen(buffer), 0);
-    return;
     
     bzero(t_resp, MSGSIZE);
     int rs;
@@ -668,6 +678,30 @@ void leave_group(char* t_resp, char* t_groupid, int t_socketfd) {
     }
 }
 
+void get_files_in_group(char* t_resp, int t_groupid, int t_socketfd) {
+    /*
+        Req: List files in a group
+        lf:<group_id>:<user_id>
+        Res:
+            Success:<List of files separated by colon>
+            Failure
+    */
+    vector<string> message_parts{"lf", to_string(t_groupid), g_userid};
+    string msg = get_colon_joined_string(message_parts);
+
+    char buffer[MSGSIZE];
+    bzero(buffer, MSGSIZE);
+    strcpy(buffer, msg.c_str());
+    send(t_socketfd, buffer, strlen(buffer) + 1, 0);
+
+    int rs;
+    rs = recv(t_socketfd, t_resp, MSGSIZE, 0);
+
+    if(rs < 0) {
+        print_err_and_exit("error in receiving files list");
+    }
+}
+
 void* client_thread(void* arg) {
     bool keep_running = true;
 
@@ -702,13 +736,14 @@ void* client_thread(void* arg) {
         int option = get_option_number(command_components[0]);
         switch (option)
         {
-            case 1: {
+            case 1: {   // Upload file
                         string c_filename = command_components[1];
                         int c_groupid = get_int(command_components[2]);
 
                         char resp[MSGSIZE];
                         upload_file_to_tracker(resp, c_filename, c_groupid, socketfd);
 
+                        cout << "Response after file upload = " << resp << endl;
                         vector<char*> response_components = parse_message(resp);
                         if(strcmp(response_components[0], "Success") == 0) {
                             cout << "File uploaded successfuly" << endl;
@@ -964,6 +999,24 @@ void* client_thread(void* arg) {
                             }
                             else {
                                 cout << "Unable to complete request " << endl;
+                            }
+                            break;
+                }
+
+                case 12: {  // List files in a group
+                            int c_groupid = get_int(command_components[1]);
+
+                            char resp[MSGSIZE];
+                            get_files_in_group(resp, c_groupid, socketfd);
+
+                            vector<char*> response_components = parse_message(resp);
+                            if(strcmp(response_components[0], "Success") == 0) {
+                                for(int i = 1; i < response_components.size(); i++) {
+                                    cout << response_components[i] << endl;
+                                }
+                            }
+                            else {
+                                cout << "Error in listing files" << endl;
                             }
                             break;
                 }

@@ -214,6 +214,9 @@ int get_abb_index(const char* t_msg) {
     if(strcmp(t_msg, "cm") == 0) {
         return 13;
     }
+    if(strcmp(t_msg, "lf") == 0) {
+        return 14;
+    }
     return 5;
 }
 
@@ -631,6 +634,38 @@ void* serve_requests(void* arg) {
             //             send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
             //             break;
             // }
+
+            case 14: {  // List files in a group
+                        /*
+                            Req: List files in a group
+                            lf:<group_id>:<user_id>
+                            Res:
+                                Success:<List of files separated by colon>
+                                Failure
+                        */
+                        int m_groupid = get_int(message[1]);
+                        string m_userid = message[2];
+
+                        string msg = "";
+                        if(g_group_info[m_groupid].member_peers.find(m_userid) == g_group_info[m_groupid].member_peers.end() ||
+                            g_group_info[m_groupid].member_peers[m_userid] == false) {
+                            msg = "Failure";
+                        }
+                        else {
+                            msg = "Success:";
+                            vector<string> files_list;
+
+                            unordered_map<string, bool>::iterator it;
+                            for(it = g_group_info[m_groupid].files.begin(); it != g_group_info[m_groupid].files.end(); it++) {
+                                files_list.push_back(it->first);
+                            }
+                            msg += get_colon_joined_string(files_list);
+                        }
+                        bzero(send_buffer, MSGSIZE);
+                        strcpy(send_buffer, msg.c_str());
+                        send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
+                        break;
+            }
 
         }
         memset(recv_buffer, '\0', MSGSIZE);
