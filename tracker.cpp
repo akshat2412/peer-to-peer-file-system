@@ -112,7 +112,7 @@
     Req: List groups
     list_groups
     Res:
-        List of group ids
+        Success:<List of group ids>
 */
 /*
     Req: Check if member of group
@@ -126,11 +126,11 @@ using namespace std;
 // Global variables
 int g_port; // Port for server thread
 int g_socketfd; // file descriptor to store socket id for the servere thread
-unordered_map<string, file_info_tracker > g_file_info_tracker;
-unordered_map<string, string> g_users;
-unordered_map<string, bool> g_online_peers;
-unordered_map<int, group_info> g_group_info;
-unordered_map<string, address_info> g_userid_address_mapping;
+map<string, file_info_tracker > g_file_info_tracker;
+map<string, string> g_users;
+map<string, bool> g_online_peers;
+map<int, group_info> g_group_info;
+map<string, address_info> g_userid_address_mapping;
 
 ofstream logfile(LOG_FILE);
 void log_message(ofstream &t_file, const char* msg) {
@@ -148,31 +148,29 @@ streampos get_file_size(ifstream &t_file) {
     return end - begin;
 }
 
-bool add_file_info(char* t_port, char* t_filename, char* t_filesize, char* t_chunks) {
-    int client_port = get_int(t_port);
+bool add_file_info(string t_userid, string t_filename, long long int t_filesize, long long int t_chunks, int t_groupid) {
+
+    g_group_info[t_groupid].files[t_filename] = true;
+    
     if(g_file_info_tracker.find(t_filename) != g_file_info_tracker.end()) {
-        g_file_info_tracker[t_filename].peers_with_file.push_back(client_port);
+        g_file_info_tracker[t_filename].peers_with_file.push_back(t_userid);
         for(int i = 0; i < g_file_info_tracker[t_filename].peers_with_file.size(); i++) {
             cout << g_file_info_tracker[t_filename].peers_with_file[i] << endl;
         }
         return true;
     }
-    file_info_tracker temp;
-    g_file_info_tracker[string(t_filename)].info.chunks = get_int(t_chunks);
-    g_file_info_tracker[string(t_filename)].info.file_name = string(t_filename).c_str();
-    g_file_info_tracker[string(t_filename)].info.file_size = get_int(t_filesize);
-    g_file_info_tracker[string(t_filename)].peers_with_file.push_back(client_port);
-    // g_file_info_tracker[t_filename] = temp;
 
-    cout << "chunks " << g_file_info_tracker[t_filename].info.chunks << endl;
-    cout << "file_info " << g_file_info_tracker[t_filename].info.file_name << endl;
-    cout << "file_size " << g_file_info_tracker[t_filename].info.file_size << endl;
-    cout << "client ports " << endl;
+    vector<bool> chunks_bitset(t_chunks, true);
+    file_info f_i{
+        t_chunks,
+        t_filesize,
+        chunks_bitset, // This bitset has no use inside tracker. This is just for compatibility with file_info struct.
+        t_filename
+    };
 
-    for(int i = 0; i < g_file_info_tracker[t_filename].peers_with_file.size(); i++) {
-        cout << g_file_info_tracker[t_filename].peers_with_file[i] << endl;
-    }
-    // cout << "chunks " << g_file_info_tracker[t_filename].info.chunks << endl;
+    g_file_info_tracker[t_filename].info = f_i;
+    g_file_info_tracker[t_filename].peers_with_file.push_back(t_userid);
+
     return true;
 }
 
@@ -340,20 +338,43 @@ void* serve_requests(void* arg) {
         int index = get_abb_index(message[0]);
         cout << "index = " << index << endl;
         switch(index) {
-            case 3: {cout << "request for uploading file " << message[2] << endl;
-                    add_file_info(message[1], message[2], message[3], message[4]);
-                    g_group_info[get_int(message[5])].files[string(message[2])] = true;
-                    string t_filename = string(message[2]);
-                    cout << "chunks " << g_file_info_tracker[t_filename].info.chunks << endl;
-                    cout << "file_info " << g_file_info_tracker[t_filename].info.file_name << endl;
-                    cout << "file_size " << g_file_info_tracker[t_filename].info.file_size << endl;
-                    cout << "client ports " << endl;
 
-                    for(int i = 0; i < g_file_info_tracker[t_filename].peers_with_file.size(); i++) {
-                        cout << g_file_info_tracker[t_filename].peers_with_file[i] << endl;
+            case 3: {   // Upload file
+                        /*
+                            Req: Add the file to the list of available files in the network
+                            uf:<user_id of uploader>:<filename>:<filesize>:<number of chunks>:<group_id>
+                            Res:
+                                Success: Success
+                                Failure: Fail
+                        */
+                        string m_userid = message[1];
+                        string m_filename = message[2];
+                        long long int m_filesize = get_int(message[3]);
+                        long long int m_num_chunks = get_int(message[4]);
+                        int m_groupid = get_int(message[5]);
+
+                        cout << "request for uploading file " << message[2] << endl;
+
+                        // Check login and group membership first
+                        if(g_group_info.find(m_groupid) == g_group_info.end() ||
+                           g_group_info[m_groupid].member_peers.find(m_userid) == g_group_info[m_groupid].member_peers.end() ||
+                           g_online_peers.find(m_userid) == g_online_peers.end() ||
+                           g_online_peers[m_userid] == false) {
+                            string msg = "Failure";
+                            bzero(send_buffer, MSGSIZE);
+                            strcpy(send_buffer, msg.c_str());
+                            send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
+                            break;
+                        }
+
+                        add_file_info(m_userid, m_filename, m_filesize, m_num_chunks, m_groupid);
+                        string msg = "Success";
+                        bzero(send_buffer, MSGSIZE);
+                        strcpy(send_buffer, msg.c_str());
+                        send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
+                        break;
                     }
-                    // send(clientfd, send_buffer, strlen(send_buffer), 0);
-                    break;}
+
             // case 4: {
             //             cout << "requesting file info for " << message[1] << " for file " << message[1] << endl;
             //             file_info_tracker f = g_file_info_tracker[message[1]];
@@ -481,6 +502,7 @@ void* serve_requests(void* arg) {
                             m_owner_userid
                         };
                         g_group_info[m_group_id] = temp;
+                        g_group_info[m_group_id].member_peers[m_owner_userid] = true;
 
                         string msg = "Success";
                         bzero(send_buffer, MSGSIZE);
@@ -552,7 +574,8 @@ void* serve_requests(void* arg) {
                         string m_userid = message[2];
 
                         cout << m_userid << " requesting to leave group " << message[1] << endl;
-                        g_group_info[get_int(message[1])].member_peers[m_userid] = false;
+                        g_group_info[m_groupid].member_peers[m_userid] = false;
+                        g_group_info[m_groupid].member_peers.erase(m_userid);
 
                         string msg = "Success";
                         bzero(send_buffer, MSGSIZE);
@@ -566,12 +589,12 @@ void* serve_requests(void* arg) {
                             Req: List groups
                             list_groups
                             Res:
-                                List of group ids
+                                Success:<List of group ids>
                         */
                         cout << "Sending list of groups " << endl;
                         string msg = "Success";
 
-                        unordered_map<int, group_info>::iterator it;
+                        map<int, group_info>::iterator it;
                         it = g_group_info.begin();
                         while(it != g_group_info.end()) {
                             msg += (":" + to_string(it -> first));
@@ -583,6 +606,7 @@ void* serve_requests(void* arg) {
                         send(clientfd, send_buffer, strlen(send_buffer) + 1, 0);
                         break;
             }
+            
             // case 13: {
             //             cout << "checking membership" << endl;
             //             if(g_group_info.find(get_int(message[1])) == g_group_info.end()) {

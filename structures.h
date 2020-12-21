@@ -7,7 +7,7 @@ using namespace std;
     struct file_info {
         long long int chunks;
         long long int file_size;
-        vector<bool> chunks_info;
+        vector<bool> chunks_bitset;
         string file_name;
     };
 
@@ -25,8 +25,8 @@ using namespace std;
 
     struct file_info_tracker {
         file_info info;
-        vector<int> peers_with_file;
-        vector<int> peers_with_chunks;
+        vector<string> peers_with_file;
+        vector<string> peers_with_chunks;
     };
 
     struct group_info {

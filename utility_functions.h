@@ -28,8 +28,8 @@ void get_file_info_into_buffer(char *t_buffer, file_info &t_file_info) {
     msg_strings.push_back(file_size);
 
     string chunks_info = "";
-    for(long long int i = 0; i < t_file_info.chunks_info.size(); i++) {
-        if(t_file_info.chunks_info[i]) {
+    for(long long int i = 0; i < t_file_info.chunks_bitset.size(); i++) {
+        if(t_file_info.chunks_bitset[i]) {
             chunks_info += "1";
             continue;
         }

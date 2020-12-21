@@ -33,10 +33,10 @@
 
 /*
     Req: Add the file to the list of available files in the network
-    uf:<port number of peer server>:<filename>:<filesize>:<number of chunks>
+    uf:<user_id of uploader>:<filename>:<filesize>:<number of chunks>:<group_id>
     Res:
-        Success: Success:filename
-        Failure: Fail:filename
+        Success
+        Failure
 
 */
 
@@ -114,7 +114,7 @@
     Req: List groups
     list_groups
     Res:
-        List of group ids
+        Success:<List of group ids>
 */
 /*
     Req: Check if member of group
@@ -260,31 +260,49 @@ bool check_if_member_of_group(char* t_group_no, int t_socket_fd) {
     return false;
 }
 
-void upload_file_to_tracker(char* t_filename, char* t_groupid, int t_socketfd) {
+void upload_file_to_tracker(char* t_resp, string t_filename, int t_groupid, int t_socketfd) {
+    /*
+        Req: Add the file to the list of available files in the network
+        uf:<user_id of uploader>:<filename>:<filesize>:<number of chunks>:<group_id>
+        Res:
+            Success: Success
+            Failure: Fail
+    */
     ifstream file(t_filename, ios::binary);
     
-    bool is_member = check_if_member_of_group(t_groupid, t_socketfd);
-    if(is_member) {
-        int file_size = get_file_size(file);
-        cout << "file size = " << file_size << endl;
-        long long int num_chunks = file_size / CHUNKSIZE + 1;
+    long long int file_size = get_file_size(file);
+    cout << "file size = " << file_size << endl;
+    long long int num_chunks = file_size / CHUNKSIZE + 1;
+    vector<bool> chunks_bitset(num_chunks, true);
 
-        vector<bool> chunks(num_chunks, true);
-        file_info f = {
-            num_chunks,
-            file_size,
-            chunks,
-            "input.txt"
-        };
+    file_info f = {
+        num_chunks,
+        file_size,
+        chunks_bitset,
+        "input.txt"
+    };
 
-        string msg = "uf:"+to_string(g_port)+":"+string(t_filename)+":"+to_string(file_size)+":"+to_string(num_chunks) + ":" + string(t_groupid);
-        char buffer[MSGSIZE];
-        strcpy(buffer, msg.c_str());
+    vector<string> message_parts{   "uf",
+                                    to_string(g_port),
+                                    string(t_filename),
+                                    to_string(file_size),
+                                    to_string(num_chunks),
+                                    to_string(t_groupid)
+                                };
+    string msg = get_colon_joined_string(message_parts);
+    char buffer[MSGSIZE];
+    strcpy(buffer, msg.c_str());
 
-        send(t_socketfd, buffer, strlen(buffer), 0);
-        return;
+    send(t_socketfd, buffer, strlen(buffer), 0);
+    return;
+    
+    bzero(t_resp, MSGSIZE);
+    int rs;
+
+    rs = recv(t_socketfd, t_resp, MSGSIZE, 0);
+    if(rs < 0) {
+        print_err_and_exit("error in receiving file info");
     }
-    cout << "Unable to upload to this group " << endl;
     return;
 }
 
@@ -684,8 +702,22 @@ void* client_thread(void* arg) {
         int option = get_option_number(command_components[0]);
         switch (option)
         {
-            case 1: upload_file_to_tracker(command_components[1], command_components[2], socketfd);
-                    break;
+            case 1: {
+                        string c_filename = command_components[1];
+                        int c_groupid = get_int(command_components[2]);
+
+                        char resp[MSGSIZE];
+                        upload_file_to_tracker(resp, c_filename, c_groupid, socketfd);
+
+                        vector<char*> response_components = parse_message(resp);
+                        if(strcmp(response_components[0], "Success") == 0) {
+                            cout << "File uploaded successfuly" << endl;
+                        }
+                        else {
+                            cout << "Error in uploading file. Check if you're member of the group and logged in." << endl;
+                        }
+                        break;
+            }
             
             case 2: {
                         char file_resp[MSGSIZE];
@@ -866,7 +898,7 @@ void* client_thread(void* arg) {
 								Req: List groups
 								list_groups
 								Res:
-									List of group ids
+									Success:<List of group ids?>
 							*/
                             string msg = "list_groups";
                             char buffer[MSGSIZE];
